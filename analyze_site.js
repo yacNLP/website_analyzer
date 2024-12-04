@@ -386,11 +386,40 @@ const logJavaScriptErrors = (page) => {
     console.log(`PDF report saved to ${pdfPath}`);
 };
 
+/** ----------------------------
+ *  Check for XSS Vulnerabilities
+ ---------------------------- */
+ const checkXSSVulnerabilities = async (page, url) => {
+    console.log("Checking for XSS vulnerabilities...");
+    const xssPayload = "<script>alert('XSS')</script>";
+    await page.goto(url);
+    const inputs = await page.$$('input[type="text"], textarea');
+    const vulnerableFields = [];
+
+    for (const input of inputs) {
+        try {
+            await input.type(xssPayload);
+            await page.keyboard.press('Enter');
+            const pageContent = await page.content();
+            if (pageContent.includes(xssPayload)) {
+                const fieldName = await page.evaluate(el => el.name || 'Unnamed Field', input);
+                vulnerableFields.push(fieldName);
+            }
+        } catch (error) {
+            console.error(`Error testing input field for XSS: ${error.message}`);
+        }
+    }
+
+    return {
+        vulnerableFields,
+        status: vulnerableFields.length > 0 ? 'Vulnerable' : 'Secure',
+    };
+};
 
 /** ----------------------------
  *  Main Function: Analyze Website
  ---------------------------- */
- const analyzeSite = async (url) => {
+const analyzeSite = async (url) => {
     const browser = await puppeteer.launch({
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
@@ -422,11 +451,12 @@ const logJavaScriptErrors = (page) => {
             redirects: await analyzeRedirects(page, url),
             largeAssets: await analyzeAssets(page),
             carbonImpact: await analyzeCarbonImpact(url),
+            xssVulnerabilities: await checkXSSVulnerabilities(page, url), // Ajout des vulnérabilités XSS
         };
 
         // Logs importants pour vous
-        detailedLogs(url, results)
-       
+        detailedLogs(url, results);
+
         // Sauvegarder le rapport JSON
         const reportPath = './out/complete-analysis.json';
         await fs.writeFile(reportPath, JSON.stringify(results, null, 2));
@@ -442,55 +472,65 @@ const logJavaScriptErrors = (page) => {
     }
 };
 
-// Lancer l'analyse
+// Lancer l’analyse
 analyzeSite('https://afs.algerieferries.dz/');
 
 
+
 function detailedLogs(url, results) {
-     // Logs importants pour vous
-     console.log(`\n========= Summary for ${url} =========`);
+    // Logs importants pour vous
+    console.log(`\n========= Summary for ${url} =========`);
 
-     console.log(`\nPerformance: ${results.performance || 'N/A'}`);
-     console.log(`SEO: ${results.seo || 'N/A'}`);
-     console.log(`Accessibility: ${results.accessibility || 'N/A'}`);
-     console.log(`Broken Links: ${results.brokenLinks.length || 0}`);
-     console.log(`Large Assets: ${results.largeAssets.largeAssets?.length || 0}`);
-     console.log(
-         `Missing Security Headers: ${
-             results.missingSecurityHeaders.length > 0
-                 ? results.missingSecurityHeaders.join(', ')
-                 : 'None'
-         }`
-     );
-     console.log(`Third-party Resources: ${results.thirdPartyResources.length || 0}`);
-     console.log(
-         `Carbon Impact (g/visit): Grid - ${
-             results.carbonImpact?.statistics?.co2.grid || 'N/A'
-         }, Renewable - ${results.carbonImpact?.statistics?.co2.renewable || 'N/A'}`
-     );
+    console.log(`\nPerformance: ${results.performance || 'N/A'}`);
+    console.log(`SEO: ${results.seo || 'N/A'}`);
+    console.log(`Accessibility: ${results.accessibility || 'N/A'}`);
+    console.log(`Broken Links: ${results.brokenLinks.length || 0}`);
+    console.log(`Large Assets: ${results.largeAssets.largeAssets?.length || 0}`);
+    console.log(
+        `Missing Security Headers: ${
+            results.missingSecurityHeaders.length > 0
+                ? results.missingSecurityHeaders.join(', ')
+                : 'None'
+        }`
+    );
+    console.log(`Third-party Resources: ${results.thirdPartyResources.length || 0}`);
+    console.log(
+        `Carbon Impact (g/visit): Grid - ${
+            results.carbonImpact?.statistics?.co2.grid || 'N/A'
+        }, Renewable - ${results.carbonImpact?.statistics?.co2.renewable || 'N/A'}`
+    );
 
-     console.log(
-         results.performance < 70
-             ? '\n⚠️ Performance needs improvement!'
-             : '\n✅ Performance is good!'
-     );
+    console.log(
+        results.performance < 70
+            ? '\n⚠️ Performance needs improvement!'
+            : '\n✅ Performance is good!'
+    );
 
-     if (results.brokenLinks.length > 0) {
-         console.log('\n⚠️ Broken Links Detected:');
-         results.brokenLinks.forEach(link =>
-             console.log(`- ${link.url} (status: ${link.status})`)
-         );
-     } else {
-         console.log('\n✅ No broken links detected.');
-     }
+    if (results.brokenLinks.length > 0) {
+        console.log('\n⚠️ Broken Links Detected:');
+        results.brokenLinks.forEach(link =>
+            console.log(`- ${link.url} (status: ${link.status})`)
+        );
+    } else {
+        console.log('\n✅ No broken links detected.');
+    }
 
-     if (results.missingSecurityHeaders.length > 0) {
-         console.log('\n⚠️ Missing Security Headers:');
-         results.missingSecurityHeaders.forEach(header => console.log(`- ${header}`));
-     } else {
-         console.log('\n✅ All security headers are present.');
-     }
+    if (results.missingSecurityHeaders.length > 0) {
+        console.log('\n⚠️ Missing Security Headers:');
+        results.missingSecurityHeaders.forEach(header => console.log(`- ${header}`));
+    } else {
+        console.log('\n✅ All security headers are present.');
+    }
 
-     console.log('\n======================================\n');
+    // Logs pour les vulnérabilités XSS
+    if (results.xssVulnerabilities.vulnerableFields.length > 0) {
+        console.log('\n⚠️ XSS Vulnerabilities Detected:');
+        results.xssVulnerabilities.vulnerableFields.forEach(field =>
+            console.log(`- Vulnerable Field: ${field}`)
+        );
+    } else {
+        console.log('\n✅ No XSS vulnerabilities detected.');
+    }
 
+    console.log('\n======================================\n');
 }
