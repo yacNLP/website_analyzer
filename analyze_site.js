@@ -267,7 +267,7 @@ const logJavaScriptErrors = (page) => {
 /** ----------------------------
  *  generate pdf
  ---------------------------- */
- const generatePDFReport = async (results, outputDir) => {
+ const generatePDFReport = async (results, outputDir, siteName) => {
     console.log("Generating PDF report...");
 
     // Préparer le contenu HTML du rapport
@@ -291,6 +291,7 @@ const logJavaScriptErrors = (page) => {
         <body>
             <h1>Website Analysis Report</h1>
             <p><strong>URL Analysée :</strong> ${results.url || '(à modifier)'}</p>
+            <p><strong>Nom du site :</strong> ${siteName}</p>
             <p><strong>Date du rapport :</strong> ${new Date().toLocaleString()}</p>
 
             <h2>Résumé des scores</h2>
@@ -379,7 +380,11 @@ const logJavaScriptErrors = (page) => {
     });
     const page = await browser.newPage();
     await page.setContent(htmlContent);
-    const pdfPath = `${outputDir}/report.pdf`;
+
+    // Nom unique pour chaque PDF
+    const sanitizedSiteName = siteName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    const pdfPath = `${outputDir}/report-${sanitizedSiteName}.pdf`;
+
     await page.pdf({ path: pdfPath, format: 'A4', printBackground: true });
     await browser.close();
 
@@ -419,7 +424,7 @@ const logJavaScriptErrors = (page) => {
 /** ----------------------------
  *  Main Function: Analyze Website
  ---------------------------- */
-const analyzeSite = async (url) => {
+const analyzeSite = async (url, siteName) => {
     const browser = await puppeteer.launch({
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
@@ -458,22 +463,22 @@ const analyzeSite = async (url) => {
         detailedLogs(url, results);
 
         // Sauvegarder le rapport JSON
-        const reportPath = './out/complete-analysis.json';
+        const reportPath = `${outputDir}/analysis-${siteName.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.json`;
         await fs.writeFile(reportPath, JSON.stringify(results, null, 2));
         console.log(`Analysis complete! Report saved to ${reportPath}`);
 
         // Générer le PDF
-        await generatePDFReport(results, outputDir);
+        await generatePDFReport(results, outputDir, siteName);
 
     } catch (error) {
-        console.error("Error during analysis:", error);
+        console.error(`Error during analysis for ${siteName}:`, error);
     } finally {
         await browser.close();
     }
 };
 
 // Lancer l’analyse
-analyzeSite('https://afs.algerieferries.dz/');
+//analyzeSite('https://afs.algerieferries.dz/');
 
 
 
@@ -534,3 +539,28 @@ function detailedLogs(url, results) {
 
     console.log('\n======================================\n');
 }
+
+
+const sitesToAnalyze = [
+    { name: "AMR Serrurier", url: "https://www.amr-serrurier.fr" },
+    { name: "Primo Travaux", url: "https://www.primotravaux.fr" },
+]
+
+
+// Stocker les résultats
+const siteResults = [];
+
+/** ----------------------------
+ *  Fonction principale pour analyser plusieurs sites
+ ---------------------------- */
+async function analyzeMultipleSites(sites) {
+    for (const site of sites) {
+        console.log(`Analyzing site: ${site.name} (${site.url})`);
+        const result = await analyzeSite(site.url,site.name); // Appel de votre fonction d'analyse
+        siteResults.push({ name: site.name, url: site.url, ...result });
+    }
+}
+
+
+// Lancer l'analyse
+analyzeMultipleSites(sitesToAnalyze);
