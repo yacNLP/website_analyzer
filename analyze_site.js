@@ -141,9 +141,11 @@ const analyzeRedirects = async (page, url) => {
 /** ----------------------------
  *  Function: Analyze Unused CSS/JS
  ---------------------------- */
-const analyzeAssets = async (page) => {
+ const analyzeAssets = async (page) => {
     console.log("Analyzing assets...");
     const assets = [];
+
+    // Capturer les réponses réseau
     page.on('response', async (response) => {
         const url = response.url();
         if (url.endsWith('.css') || url.endsWith('.js')) {
@@ -152,10 +154,18 @@ const analyzeAssets = async (page) => {
         }
     });
 
-    await page.reload();
+    try {
+        // Recharger avec un timeout plus élevé
+        await page.reload({ timeout: 60000, waitUntil: 'domcontentloaded' });
+    } catch (error) {
+        console.error("Error reloading the page for asset analysis:", error.message);
+        return { assets, error: "Page reload timeout or failure" };
+    }
+
     const largeAssets = assets.filter(asset => asset.size > 50000); // Assets > 50 KB
-    return largeAssets;
+    return { assets, largeAssets };
 };
+
 
 /** ----------------------------
  *  Function: Analyze Carbon Impact
@@ -168,9 +178,219 @@ const analyzeCarbonImpact = async (url) => {
 };
 
 /** ----------------------------
+ *  Analyze metadata
+ ---------------------------- */
+ const analyzeMetaData = async (page) => {
+    console.log("Analyzing metadata...");
+    try {
+        const title = await page.title();
+        
+        // Vérifier la présence de meta description
+        const metaDescription = await page.$eval(
+            'meta[name="description"]',
+            el => el.content
+        ).catch(() => "No meta description found");
+
+        // Vérifier la présence de Open Graph description
+        const ogDescription = await page.$eval(
+            'meta[property="og:description"]',
+            el => el.content
+        ).catch(() => "No Open Graph description found");
+
+        // Vérifier la présence de Open Graph title
+        const ogTitle = await page.$eval(
+            'meta[property="og:title"]',
+            el => el.content
+        ).catch(() => "No Open Graph title found");
+
+        return {
+            title,
+            metaDescription,
+            ogTitle,
+            ogDescription,
+        };
+    } catch (error) {
+        console.error("Error analyzing metadata:", error.message);
+        return {
+            title: "Error fetching title",
+            metaDescription: "Error fetching meta description",
+            ogTitle: "Error fetching Open Graph title",
+            ogDescription: "Error fetching Open Graph description",
+        };
+    }
+};
+
+
+/** ----------------------------
+ *  Analyze cookies
+ ---------------------------- */
+ const analyzeCookies = async (page) => {
+    console.log("Analyzing cookies...");
+    const cookies = await page.cookies();
+    return cookies.map(cookie => ({
+        name: cookie.name,
+        value: cookie.value,
+        domain: cookie.domain,
+        secure: cookie.secure,
+        httpOnly: cookie.httpOnly,
+        expires: cookie.expires === -1 ? 'Session' : new Date(cookie.expires * 1000).toISOString(),
+    }));
+};
+
+
+/** ----------------------------
+ *  Verify tiers Scripts
+ ---------------------------- */
+const analyzeThirdPartyResources = async (page) => {
+    console.log("Analyzing third-party resources...");
+    const thirdPartyResources = [];
+    page.on('response', async (response) => {
+        const url = response.url();
+        if (!url.includes('yourdomain.com')) {
+            thirdPartyResources.push(url);
+        }
+    });
+    await page.reload();
+    return thirdPartyResources;
+};
+
+/** ----------------------------
+ *  Verify js Errors
+ ---------------------------- */
+const logJavaScriptErrors = (page) => {
+    console.log("Logging JavaScript errors...");
+    page.on('pageerror', error => {
+        console.log("JavaScript error detected:", error.message);
+    });
+};
+
+/** ----------------------------
+ *  generate pdf
+ ---------------------------- */
+ const generatePDFReport = async (results, outputDir) => {
+    console.log("Generating PDF report...");
+
+    // Préparer le contenu HTML du rapport
+    const htmlContent = `
+        <html>
+        <head>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }
+                h1 { text-align: center; color: #183b71; font-size: 24px; }
+                h2 { color: #333; font-size: 20px; border-bottom: 2px solid #ddd; padding-bottom: 5px; }
+                table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                th { background-color: #f4f4f4; }
+                .score { font-weight: bold; }
+                .problem { color: red; }
+                .ok { color: green; }
+                .recommendation { font-style: italic; }
+                .footer { margin-top: 40px; font-size: 12px; color: #555; text-align: center; }
+            </style>
+        </head>
+        <body>
+            <h1>Website Analysis Report</h1>
+            <p><strong>URL Analysée :</strong> ${results.url || '(à modifier)'}</p>
+            <p><strong>Date du rapport :</strong> ${new Date().toLocaleString()}</p>
+
+            <h2>Résumé des scores</h2>
+            <table>
+                <tr><th>Catégorie</th><th>Score</th><th>Statut</th><th>Recommandation</th></tr>
+                <tr>
+                    <td>Performance</td>
+                    <td class="score">${results.performance || '(à modifier)'}</td>
+                    <td class="${results.performance > 70 ? "ok" : "problem"}">
+                        ${results.performance > 70 ? "Bon" : "À améliorer"}
+                    </td>
+                    <td class="recommendation">
+                        ${results.performance > 70 ? "Aucune action requise" : "Optimisez les scripts et les images."}
+                    </td>
+                </tr>
+                <tr>
+                    <td>SEO</td>
+                    <td class="score">${results.seo || '(à modifier)'}</td>
+                    <td class="${results.seo > 70 ? "ok" : "problem"}">
+                        ${results.seo > 70 ? "Bon" : "À améliorer"}
+                    </td>
+                    <td class="recommendation">
+                        ${results.seo > 70 ? "Aucune action requise" : "Ajoutez des balises meta et alt."}
+                    </td>
+                </tr>
+                <tr>
+                    <td>Accessibilité</td>
+                    <td class="score">${results.accessibility || '(à modifier)'}</td>
+                    <td class="${results.accessibility > 70 ? "ok" : "problem"}">
+                        ${results.accessibility > 70 ? "Bon" : "À améliorer"}
+                    </td>
+                    <td class="recommendation">
+                        ${results.accessibility > 70 ? "Aucune action requise" : "Ajoutez des labels ARIA."}
+                    </td>
+                </tr>
+                <tr>
+                    <td>Headers de Sécurité</td>
+                    <td>N/A</td>
+                    <td class="${results.missingSecurityHeaders.length === 0 ? "ok" : "problem"}">
+                        ${results.missingSecurityHeaders.length === 0 ? "Bon" : "À améliorer"}
+                    </td>
+                    <td class="recommendation">
+                        ${results.missingSecurityHeaders.length === 0 
+                            ? "Aucune action requise" 
+                            : "Ajoutez : " + results.missingSecurityHeaders.join(', ')}
+                    </td>
+                </tr>
+            </table>
+
+            <h2>Détails des problèmes détectés</h2>
+            <ul>
+                <li><strong>Liens cassés :</strong> ${results.brokenLinks.length || 'Aucun'}</li>
+                <li><strong>Assets lourds :</strong> ${results.largeAssets.largeAssets?.length || 'Aucun'}</li>
+                <li><strong>Ressources tierces :</strong> ${results.thirdPartyResources.length || 'Aucune'}</li>
+                <li><strong>Impact Carbone (g/visite) :</strong> Grid - ${
+                    results.carbonImpact?.statistics?.co2.grid || '(à modifier)'
+                }, Renewable - ${
+                    results.carbonImpact?.statistics?.co2.renewable || '(à modifier)'
+                }</li>
+            </ul>
+
+            <h2>Recommandations générales</h2>
+            <p>
+                Ce rapport met en lumière les points à améliorer pour optimiser votre site. 
+                Voici quelques suggestions générales :
+            </p>
+            <ol>
+                <li>Activez la mise en cache côté serveur pour accélérer les performances.</li>
+                <li>Ajoutez des headers de sécurité pour protéger vos utilisateurs.</li>
+                <li>Optimisez les balises meta pour améliorer le SEO.</li>
+                <li>Réduisez la taille des fichiers CSS et JavaScript non utilisés.</li>
+            </ol>
+
+            <div class="footer">
+                Ce rapport a été généré automatiquement par l'outil d'analyse de site. Pour plus de détails, veuillez contacter [Votre Nom ou Entreprise].
+            </div>
+        </body>
+        </html>
+    `;
+
+    // Générer le PDF à partir du contenu HTML
+    const browser = await puppeteer.launch({ 
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        
+    });
+    const page = await browser.newPage();
+    await page.setContent(htmlContent);
+    const pdfPath = `${outputDir}/report.pdf`;
+    await page.pdf({ path: pdfPath, format: 'A4', printBackground: true });
+    await browser.close();
+
+    console.log(`PDF report saved to ${pdfPath}`);
+};
+
+
+/** ----------------------------
  *  Main Function: Analyze Website
  ---------------------------- */
-const analyzeSite = async (url) => {
+ const analyzeSite = async (url) => {
     const browser = await puppeteer.launch({
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
@@ -180,10 +400,22 @@ const analyzeSite = async (url) => {
 
     try {
         console.log(`Starting analysis for: ${url}`);
+
+        // Assurer que le dossier "out" existe
+        const outputDir = './out';
+        await fs.mkdir(outputDir, { recursive: true });
+
+        // Capturer les erreurs JavaScript
+        logJavaScriptErrors(page);
+
+        // Exécuter toutes les analyses
         const results = {
             url,
             ...await analyzePerformance(url, browserWSEndpoint),
             brokenLinks: await checkBrokenLinks(page),
+            cookies: await analyzeCookies(page),
+            metadata: await analyzeMetaData(page),
+            thirdPartyResources: await analyzeThirdPartyResources(page),
             images: await analyzeImages(page),
             fonts: await analyzeFonts(page),
             missingSecurityHeaders: await analyzeSecurityHeaders(page, url),
@@ -192,9 +424,17 @@ const analyzeSite = async (url) => {
             carbonImpact: await analyzeCarbonImpact(url),
         };
 
+        // Logs importants pour vous
+        detailedLogs(url, results)
+       
+        // Sauvegarder le rapport JSON
         const reportPath = './out/complete-analysis.json';
         await fs.writeFile(reportPath, JSON.stringify(results, null, 2));
         console.log(`Analysis complete! Report saved to ${reportPath}`);
+
+        // Générer le PDF
+        await generatePDFReport(results, outputDir);
+
     } catch (error) {
         console.error("Error during analysis:", error);
     } finally {
@@ -202,5 +442,55 @@ const analyzeSite = async (url) => {
     }
 };
 
-// Run the analysis
-analyzeSite('https://depannage-remorquage44.fr/');
+// Lancer l'analyse
+analyzeSite('https://afs.algerieferries.dz/');
+
+
+function detailedLogs(url, results) {
+     // Logs importants pour vous
+     console.log(`\n========= Summary for ${url} =========`);
+
+     console.log(`\nPerformance: ${results.performance || 'N/A'}`);
+     console.log(`SEO: ${results.seo || 'N/A'}`);
+     console.log(`Accessibility: ${results.accessibility || 'N/A'}`);
+     console.log(`Broken Links: ${results.brokenLinks.length || 0}`);
+     console.log(`Large Assets: ${results.largeAssets.largeAssets?.length || 0}`);
+     console.log(
+         `Missing Security Headers: ${
+             results.missingSecurityHeaders.length > 0
+                 ? results.missingSecurityHeaders.join(', ')
+                 : 'None'
+         }`
+     );
+     console.log(`Third-party Resources: ${results.thirdPartyResources.length || 0}`);
+     console.log(
+         `Carbon Impact (g/visit): Grid - ${
+             results.carbonImpact?.statistics?.co2.grid || 'N/A'
+         }, Renewable - ${results.carbonImpact?.statistics?.co2.renewable || 'N/A'}`
+     );
+
+     console.log(
+         results.performance < 70
+             ? '\n⚠️ Performance needs improvement!'
+             : '\n✅ Performance is good!'
+     );
+
+     if (results.brokenLinks.length > 0) {
+         console.log('\n⚠️ Broken Links Detected:');
+         results.brokenLinks.forEach(link =>
+             console.log(`- ${link.url} (status: ${link.status})`)
+         );
+     } else {
+         console.log('\n✅ No broken links detected.');
+     }
+
+     if (results.missingSecurityHeaders.length > 0) {
+         console.log('\n⚠️ Missing Security Headers:');
+         results.missingSecurityHeaders.forEach(header => console.log(`- ${header}`));
+     } else {
+         console.log('\n✅ All security headers are present.');
+     }
+
+     console.log('\n======================================\n');
+
+}
